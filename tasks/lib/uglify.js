@@ -40,7 +40,52 @@ exports.init = function(grunt) {
         filename: file,
         toplevel: topLevel
       });
+
+      if(outputOptions.source_map) {
+        outputOptions.source_map.get().setSourceContent(file, code);
+      }
     });
+
+    function unwrapEvals(toplevel, source_map) {
+      function tryUnwrap(node) {
+        var sourceURLRegexp = /\/\/(#|@)\ssourceURL=\s*(\S*?)\s*$/m, match, call;
+        if (node instanceof UglifyJS.AST_Call &&
+            node.expression instanceof UglifyJS.AST_Symbol &&
+            node.expression.name === "eval" &&
+            node.args.length === 1 &&
+            node.args[0] instanceof UglifyJS.AST_String &&
+            (match = sourceURLRegexp.exec(node.args[0].value))) {
+
+          var path = match[2];
+          var code = node.args[0].value;
+
+          if (source_map) {
+            source_map.get().setSourceContent(path, code);
+          }
+
+          var body = UglifyJS.parse(code, { filename: path });
+          var fun = new UglifyJS.AST_Function(body);
+          var call = new UglifyJS.AST_Call({ expression: UglifyJS.AST_Seq.from_array([fun]), args: [] });
+          node = new UglifyJS.AST_SimpleStatement({ body: call });
+
+          node = node.transform(expandSourceURL);
+
+          return node;
+        }
+      }
+
+        var expandSourceURL = new UglifyJS.TreeTransformer(function(node, descend) {
+            if(node instanceof UglifyJS.AST_SimpleStatement) {
+              return tryUnwrap(node.body);
+            } else {
+              return tryUnwrap(node);
+            }
+        });
+
+        return toplevel.transform(expandSourceURL);
+    }
+
+    topLevel = unwrapEvals(topLevel, outputOptions.source_map);
 
     // Wrap code in a common js wrapper.
     if (options.wrap) {
