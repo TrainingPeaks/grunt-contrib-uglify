@@ -2,7 +2,7 @@
  * grunt-contrib-uglify
  * http://gruntjs.com/
  *
- * Copyright (c) 2013 "Cowboy" Ben Alman, contributors
+ * Copyright (c) 2014 "Cowboy" Ben Alman, contributors
  * Licensed under the MIT license.
  */
 
@@ -43,6 +43,14 @@ module.exports = function(grunt) {
           'tmp/compress_mangle.js': ['test/fixtures/src/simple.js']
         }
       },
+      compress_mangle_banner: {
+        files: {
+          'tmp/compress_mangle_banner.js': ['test/fixtures/src/simple.js']
+        },
+        options : {
+          banner : '// banner without sourcemap\n'
+        }
+      },
       no_src: {
         files: {
           'tmp/compress_mangle.js': []
@@ -63,7 +71,22 @@ module.exports = function(grunt) {
           'tmp/compress_mangle_beautify.js': ['test/fixtures/src/simple.js']
         },
         options: {
-          beautify: true
+          beautify: true,
+          footer: '\n// This is a footer.'
+        }
+      },
+      enclose: {
+        files: {
+          'tmp/enclose.js': ['test/fixtures/src/simple.js']
+        },
+        options: {
+          beautify: true,
+          compress: false,
+          enclose: {
+            'window.argA': 'paramA',
+            'window.argB': 'paramB'
+          },
+          mangle: false
         }
       },
       multifile: {
@@ -72,33 +95,6 @@ module.exports = function(grunt) {
         },
         options: {
           mangle: false
-        }
-      },
-      compress_mangle_sourcemap: {
-        files: {
-          '/dev/null': ['test/fixtures/src/simple.js']
-        },
-        options: {
-          sourceMap: 'tmp/compress_mangle_sourcemap'
-        }
-      },
-      sourcemapin: {
-        files: {
-          'tmp/sourcemapin.js': ['test/fixtures/src/simple2.js']
-        },
-        options: {
-          mangle : false,
-          sourceMap: 'tmp/sourcemapin',
-          sourceMapIn: 'test/fixtures/src/simple2.map',
-          sourceMapRoot: 'http://local.host/js/'
-        }
-      },
-      sourcemapurl: {
-        files: {
-          'tmp/sourcemapurl.js': ['test/fixtures/src/simple.js']
-        },
-        options: {
-          sourceMappingURL: 'js/sourcemapurl.js.map'
         }
       },
       comments: {
@@ -126,29 +122,82 @@ module.exports = function(grunt) {
           exportAll: true
         }
       },
-      sourcemap_prefix: {
-        files: {
-          '/dev/null': ['test/fixtures/src/simple.js']
-        },
+      sourcemap_basic: {
+        src: 'test/fixtures/src/simple.js',
+        dest: 'tmp/sourcemap_basic.js',
         options: {
-          sourceMap: 'tmp/sourcemap_prefix',
-          sourceMapPrefix: 3
+          sourceMap: true
         }
       },
-      multiple_sourcemaps: {
-        files: {
-          'tmp/multiple_sourcemaps1.js': ['test/fixtures/src/simple.js'],
-          'tmp/multiple_sourcemaps2.js': ['test/fixtures/src/comments.js']
-        },
+      sourcemap_customName: {
+        src: 'test/fixtures/src/simple.js',
+        dest: 'tmp/sourcemap_customName.js',
         options: {
-          sourceMap: function(dest) {
-            return dest.replace(/\.js$/,".map");
-          },
-          sourceMappingURL: function(dest) {
-            return dest.replace(/\.js$/,".mapurl");
+          sourceMap: true,
+          sourceMapName: 'tmp/source_map_custom_name'
+        }
+      },
+      sourcemap_customDir: {
+        src: 'test/fixtures/src/simple.js',
+        dest: 'tmp/sourcemap_customDir.js',
+        options: {
+          sourceMap: true,
+          sourceMapName: 'tmp/deep/directory/location/source_map.js.map'
+        }
+      },
+      sourcemap_functionName: {
+        src: 'test/fixtures/src/simple.js',
+        dest: 'tmp/sourcemap_functionName.js',
+        options: {
+          sourceMap: true,
+          sourceMapName: function( dest ) {
+            return dest + ".fn.map";
           }
         }
-      }
+      },
+      sourcemap_multiple: {
+        files: {
+          'tmp/sourcemaps_multiple1.js': ['test/fixtures/src/simple.js'],
+          'tmp/sourcemaps_multiple2.js': ['test/fixtures/src/comments.js']
+        },
+        options: {
+          sourceMap: true
+        }
+      },
+      sourcemap_multipleFunctionNames: {
+        files: {
+          'tmp/sourcemaps_multiple1_fnName.js': ['test/fixtures/src/simple.js'],
+          'tmp/sourcemaps_multiple2_fnName.js': ['test/fixtures/src/comments.js']
+        },
+        options: {
+          sourceMap: true,
+          sourceMapName: function( dest ) {
+            return dest+'.fn.map';
+          }
+        }
+      },
+      sourcemapin: {
+        files: {
+          'tmp/sourcemapin.js': ['test/fixtures/src/simple2.js']
+        },
+        options: {
+          mangle: false,
+          banner: '// Hello World\n',
+          sourceMap: true,
+          sourceMapIn: function() {
+            return 'test/fixtures/src/simple2.map';
+          }
+        }
+      },
+      sourcemap_sources: {
+          files: {
+            'tmp/sourcemap_sources.js': ['test/fixtures/src/simple.js']
+          },
+          options: {
+            sourceMap: true,
+            sourceMapIncludeSources: true
+          }
+        },
     },
 
     // Unit tests.
@@ -156,6 +205,24 @@ module.exports = function(grunt) {
       tests: ['test/*_test.js']
     }
 
+  });
+
+  // task that expects its argument (another task) to fail
+  grunt.registerTask('expectFail', function(){
+    var task = this.args.join(':');
+
+    var done = this.async();
+
+    function onComplete(error, result, code) {
+      grunt.log.write("\n > " + result.stdout.split("\n").join("\n > ") + "\n");
+      var rv = error ? true : new Error("Task " + task + " unexpectedly passed.");
+      done(rv);
+    }
+
+    grunt.util.spawn({
+      grunt : true,
+      args : task
+    }, onComplete);
   });
 
   // Actually load this plugin's task(s).
@@ -169,7 +236,30 @@ module.exports = function(grunt) {
 
   // Whenever the "test" task is run, first clean the "tmp" dir, then run this
   // plugin's task(s), then test the result.
-  grunt.registerTask('test', ['clean', 'uglify', 'nodeunit']);
+  grunt.registerTask('test', [
+    'clean',
+    'uglify:compress',
+    'uglify:compress_mangle',
+    'uglify:compress_mangle_banner',
+    'uglify:no_src',
+    'uglify:compress_mangle_except',
+    'uglify:compress_mangle_beautify',
+    'uglify:multifile',
+    'uglify:sourcemap_sources',
+    'uglify:comments',
+    'uglify:wrap',
+    'uglify:exportAll',
+    'uglify:enclose',
+    'uglify:sourcemap_basic',
+    'uglify:sourcemap_customName',
+    'uglify:sourcemap_customDir',
+    'uglify:sourcemap_functionName',
+    'uglify:sourcemap_multiple',
+    'uglify:sourcemap_multipleFunctionNames',
+    'uglify:sourcemapin',
+    'uglify:sourcemap_sources',
+    'nodeunit'
+  ]);
 
   // By default, lint and run all tests.
   grunt.registerTask('default', ['jshint', 'test', 'build-contrib']);
