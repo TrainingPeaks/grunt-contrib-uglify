@@ -8,30 +8,10 @@
 
 'use strict';
 
-var path = require('path');
-var chalk = require('chalk');
-var maxmin = require('maxmin');
-
-// Return the relative path from file1 => file2
-function relativePath(file1, file2) {
-
-  var file1Dirname = path.dirname(file1);
-  var file2Dirname = path.dirname(file2);
-  if (file1Dirname !== file2Dirname) {
-    return path.relative(file1Dirname, file2Dirname) + path.sep;
-  } else {
-    return "";
-  }
-
-}
-
-// Converts \r\n to \n
-function normalizeLf( string ) {
-  return string.replace(/\r\n/g, '\n');
-}
-
 module.exports = function(grunt) {
+
   // Internal lib.
+  var contrib = require('grunt-lib-contrib').init(grunt);
   var uglify = require('./lib/uglify').init(grunt);
 
   grunt.registerMultiTask('uglify', 'Minify files with UglifyJS.', function() {
@@ -44,20 +24,27 @@ module.exports = function(grunt) {
       },
       mangle: {},
       beautify: false,
-      report: 'min'
+      report: false
     });
 
     // Process banner.
-    var banner = normalizeLf(options.banner);
-    var footer = normalizeLf(options.footer);
-    var mapNameGenerator, mapInNameGenerator;
+    var banner = grunt.template.process(options.banner);
+    var footer = grunt.template.process(options.footer);
+    var mapNameGenerator, mappingURLGenerator;
+
+    if (options.sourceMap && banner) {
+      grunt.log.warn(
+        "Grunt-contrib-uglify does not support adding a banner alongside sourcemaps. Add the banner to " +
+        "your unminified source and then uglify."
+      );
+    }
 
     // Iterate over all src-dest file pairs.
     this.files.forEach(function(f) {
       var src = f.src.filter(function(filepath) {
         // Warn on and remove invalid source files (if nonull was set).
         if (!grunt.file.exists(filepath)) {
-          grunt.log.warn('Source file ' + chalk.cyan(filepath) + ' not found.');
+          grunt.log.warn('Source file "' + filepath + '" not found.');
           return false;
         } else {
           return true;
@@ -65,57 +52,38 @@ module.exports = function(grunt) {
       });
 
       if (src.length === 0) {
-        grunt.log.warn('Destination ' + chalk.cyan(f.dest) + ' not written because src files were empty.');
+        grunt.log.warn('Destination (' + f.dest + ') not written because src files were empty.');
         return;
       }
 
       // function to get the name of the sourceMap
-      if (typeof options.sourceMapName === "function") {
-        mapNameGenerator = options.sourceMapName;
+      if (typeof options.sourceMap === "function") {
+        mapNameGenerator = options.sourceMap;
       }
 
-      // function to get the name of the sourceMapIn file
-      if (typeof options.sourceMapIn === "function") {
-        if (src.length !== 1) {
-          grunt.fail.warn('Cannot generate `sourceMapIn` for multiple source files.');
-        }
-        mapInNameGenerator = options.sourceMapIn;
+      // function to get the sourceMappingURL
+      if (typeof options.sourceMappingURL === "function") {
+        mappingURLGenerator = options.sourceMappingURL;
       }
 
-      // dynamically create destination sourcemap name
       if (mapNameGenerator) {
         try {
-          options.generatedSourceMapName = mapNameGenerator(f.dest);
+          options.sourceMap = mapNameGenerator(f.dest);
         } catch (e) {
-          var err = new Error('SourceMap failed.');
+          var err = new Error('SourceMapName failed.');
           err.origError = e;
           grunt.fail.warn(err);
         }
       }
-      // If no name is passed append .map to the filename
-      else if ( !options.sourceMapName ) {
-        options.generatedSourceMapName = f.dest + '.map';
-      } else {
-        options.generatedSourceMapName = options.sourceMapName;
-      }
 
-      // Dynamically create incoming sourcemap names
-      if (mapInNameGenerator) {
+      if (mappingURLGenerator) {
         try {
-          options.sourceMapIn = mapInNameGenerator(src[0]);
+          options.sourceMappingURL = mappingURLGenerator(f.dest);
         } catch (e) {
-          var err = new Error('SourceMapInName failed.');
+          var err = new Error('SourceMappingURL failed.');
           err.origError = e;
           grunt.fail.warn(err);
         }
-      }
-
-      // Calculate the path from the dest file to the sourcemap for the
-      // sourceMappingURL reference
-      if (options.sourceMap) {
-        var destToSourceMapPath = relativePath(f.dest, options.generatedSourceMapName);
-        var sourceMapBasename = path.basename(options.generatedSourceMapName);
-        options.destToSourceMap = destToSourceMapPath + sourceMapBasename;
       }
 
       // Minify files, warn and fail on error.
@@ -123,7 +91,6 @@ module.exports = function(grunt) {
       try {
         result = uglify.minify(src, f.dest, options);
       } catch (e) {
-        console.log(e);
         var err = new Error('Uglification failed.');
         if (e.message) {
           err.message += '\n' + e.message + '. \n';
@@ -132,29 +99,30 @@ module.exports = function(grunt) {
           }
         }
         err.origError = e;
-        grunt.log.warn('Uglifying source ' + chalk.cyan(src) + ' failed.');
+        grunt.log.warn('Uglifying source "' + src + '" failed.');
         grunt.fail.warn(err);
       }
 
-      // Concat minified source + footer
-      var output = result.min + footer;
-
-      // Only prepend banner if uglify hasn't taken care of it as part of the preamble
-      if (!options.sourceMap) {
-        output = banner + output;
-      }
+      // Concat banner + minified source.
+      var output = banner + result.min + footer;
 
       // Write the destination file.
       grunt.file.write(f.dest, output);
 
       // Write source map
       if (options.sourceMap) {
-        grunt.file.write(options.generatedSourceMapName, result.sourceMap);
-        grunt.log.writeln('File ' + chalk.cyan(options.generatedSourceMapName) + ' created (source map).');
+        grunt.file.write(options.sourceMap, result.sourceMap);
+        grunt.log.writeln('Source Map "' + options.sourceMap + '" created.');
       }
 
-      grunt.log.writeln('File ' + chalk.cyan(f.dest) + ' created: ' +
-                        maxmin(result.max, output, options.report === 'gzip'));
+      // Print a success message.
+      grunt.log.writeln('File "' + f.dest + '" created.');
+
+      // ...and report some size information.
+      if (options.report) {
+        contrib.minMaxInfo(output, result.max, options.report);
+      }
     });
   });
+
 };
